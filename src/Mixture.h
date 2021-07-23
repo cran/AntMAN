@@ -1,17 +1,18 @@
 /*
- * Mixture.hpp
+ *  AntMAN Package
  *
- *  Created on: 14 Apr 2019
  */
+
 
 #ifndef ANTMAN_SRC_MIXTURE_H_
 #define ANTMAN_SRC_MIXTURE_H_
+#include <vector>
 #include <map>
 #include <iomanip>
 
-#include "GibbsResult.h"
 #include "Prior.h"
 #include "utils.h"
+#include "AntMANLogger.h"
 
 
 class allocation_result {
@@ -30,16 +31,16 @@ public :
 class Mixture {
 public :
 	virtual             ~Mixture() {};
-#ifdef HAS_RCPP
-	virtual Rcpp::List  get_tau () = 0;
-#else
-	virtual std::string  get_tau() = 0;
-#endif
+
+	virtual void  get_tau  (AntMANLogger& ) const = 0;
+
+
+
 private :
 	bool _parallel;
 protected :
 	void set_parallel(bool parallel) {this->_parallel = parallel;};
-	bool get_parallel() {return this->_parallel;};
+	bool get_parallel() const {return this->_parallel;};
 };
 
 
@@ -66,11 +67,24 @@ protected:
 			const double U,
 			const  InputType & y ) = 0;
 
-
-
+	virtual InputType sample(const arma::vec & W_current, arma::uword  n = 1) = 0;
 
 
 public:
+
+	arma::uword  runif_component(const arma::vec & W_current) {
+		VERBOSE_EXTRA("runif_component from " << W_current);
+		//VERBOSE_ASSERT( 1.0 - arma::sum(W_current) <= arma::datum::eps , "sum (W_current) is not even close to 1. Sum(W) = " << arma::sum(W_current));
+		// Step 1 - Select a component
+		arma::uword M_index = 0;
+		double M_select = am_runif(0,1);
+		for (double msum = W_current[M_index] ; (M_select > msum and M_index + 1 < W_current.size()) ; msum += W_current[++M_index]) {
+			VERBOSE_EXTRA("  - Unsatisfied by " << M_index << "with msum = " << msum << " less than " <<  M_select );
+		}
+		return M_index;
+
+
+	}
 
 	void fit(InputType y,
 			cluster_indices_t initial_clustering,
@@ -80,7 +94,9 @@ public:
 			const unsigned long  burnin ,
 			const unsigned long  thin,
 			bool parallel,
-			GibbsResult * results) {
+			AntMANLogger* logger) {
+
+		//AntMANLogger logger(niter);
 
 		VERBOSE_ASSERT(niter > burnin, "Please use a total iteration number greater then burnin.");
 		VERBOSE_ASSERT(thin  > 0     , "Please make sure to have thin > 0.");
@@ -102,17 +118,20 @@ public:
 		unsigned int K=ci_star.size();
 
 
+		// ******  init_M_na  ******
 		int M_na= prior->init_M_na(K);
 		int M=K+M_na;
 		VERBOSE_DEBUG("this->init_tau (y, M);");
+		// ******  init_tau  ******
 		this->init_tau (y, M);
 		VERBOSE_DEBUG("Done");
 
 		arma::vec  S_current (M);
+		arma::vec  W_current (M);
 
-		// TODO[CHECK ME] : S current initialized with gamma_current !!! should not right ??
+
 		for(int it=0;it<M;it++){
-			S_current[it] =am_rgamma(2.0,1.0); // replace gamma current by 2.0 for now
+			S_current[it] =am_rgamma(prior->get_gamma() ,1.0);
 		}
 
 
@@ -125,7 +144,8 @@ public:
 
 		VERBOSE_INFO ( "Let's start the Gibbs!");
 
-		unsigned long total_saved          = 0;
+		unsigned long total_saved   = 0;
+
 		double total_iter           = 0;
 		double total_u              = 0;
 		double total_ci             = 0;
@@ -134,7 +154,7 @@ public:
 		double total_gibbs          = 0;
 		auto   start_gibbs          = std::chrono::system_clock::now();
 
-
+		VERBOSE_PROGRESS_START();
 		for (unsigned int iter = 0 ; iter < niter ; iter++)  {
 
 			total_iter           = 0;
@@ -158,7 +178,8 @@ public:
 			total_u += elapsed_u.count() / 1000000.0;
 
 
-			// Update CI and CI*
+			// ******  Update CI and CI*  ******
+			//
 			VERBOSE_DEBUG("Call up_ci\n");
 			auto start_ci = std::chrono::system_clock::now();
 			if ((iter > 0) and (not fixed_clustering)) {//I need this if i want that my inizialization for ci works
@@ -174,7 +195,10 @@ public:
 
 
 			auto start_mna = std::chrono::system_clock::now();
-			M_na = prior->update_M_na(U_current, K);
+			// ******  update_M_na ******
+			if ((iter > 0) and (not fixed_clustering)) {//I need this if i want that my inizialization for ci works
+				M_na = prior->update_M_na(U_current, K);
+			}
 			M=K+M_na;
 			auto end_mna = std::chrono::system_clock::now();
 			auto elapsed_mna = end_mna - start_mna;
@@ -192,17 +216,20 @@ public:
 
 			VERBOSE_DEBUG("Call up_allocated_nonallocated\n");
 			auto start_alloc = std::chrono::system_clock::now();
+			// ******  up_allocated_nonallocated ******
 			auto up_allocated_res = this->up_allocated_nonallocated (  K , M , ci_current ,  ci_star  , prior->get_gamma(),  U_current, y );
 			const std::vector <int> nj = up_allocated_res.nj();
 
 			ci_current   = up_allocated_res.ci();
 
 			S_current = up_allocated_res.S();
+			W_current = S_current / sum(S_current);
 			auto end_alloc = std::chrono::system_clock::now();
 			auto elapsed_alloc = end_alloc - start_alloc;
 			total_alloc += elapsed_alloc.count() / 1000000.0;
 			VERBOSE_DEBUG("End up_allocated_nonallocated\n");
 
+			// ****** 	prior->update(U_current, K, nj);  ******
 			prior->update(U_current, K, nj);
 
 			VERBOSE_DEBUG("prior->update(U_current, K, nj) is done\n");
@@ -219,7 +246,22 @@ public:
 			// thinning
 			if( (iter >= burnin) and ((iter - burnin) % thin == 0) ) {
 				total_saved++;
-				results->log_output (ci_current,  S_current,  M,  K,  M_na, this , prior) ;
+
+				VERBOSE_DEBUG("Run the predictive.");
+				input_t predictive = this->sample(W_current,1).row(0).t();
+				VERBOSE_DEBUG("Predictive = " << predictive);
+
+				//   this , prior
+				logger->addlog<int>("K", K);
+				logger->addlog<int>("M", M);
+				logger->addlog("U", U_current);
+				logger->addlog("CI", ci_current);
+				logger->addlog("W", W_current);
+				logger->addlog("YPRED", predictive);
+				this->get_tau(*logger);
+				prior->get_h()->get_values(*logger);
+				prior->get_q()->get_values(*logger);
+				//results->log_output (ci_current,  W_current, predictive,  U_current, M,  K, this , prior) ;
 				VERBOSE_ASSERT(total_to_save >= total_saved, "Raffaele was right.");
 				VERBOSE_DEBUG("results->log_output() is done");
 			} else {
@@ -233,10 +275,11 @@ public:
 				VERBOSE_DEBUG("Start the logging");
 				auto end_gibbs             = std::chrono::system_clock::now();
 				auto elapsed_gibbs         = end_gibbs - start_gibbs;
-				start_gibbs           = std::chrono::system_clock::now();
+				start_gibbs                = std::chrono::system_clock::now();
 				total_gibbs               += elapsed_gibbs.count() / 1000000.0;
 
-				VERBOSE_LOG("[" << std::setw(3) << 100 * iter / (niter - 1) << "%]" <<
+				VERBOSE_PROGRESS_UPDATE(100 * iter / (niter - 1));
+				if (false) VERBOSE_LOG("[" << std::setw(3) << 100 * iter / (niter - 1) << "%]" <<
 						" iter=["<< iter + 1 << "/" << niter << "]" <<
 						" saved=["<< total_saved << "/" << total_to_save << "]" <<
 						" K="<<K<<
@@ -247,12 +290,13 @@ public:
 						" alloc=" <<total_alloc << "ms" <<
 						" iter=" <<total_iter << "ms" <<
 						" total_gibbs=" <<total_gibbs<< "ms" );
+
 			} else {
 				VERBOSE_DEBUG("Skip the logging");
 			}
 
 		}//I close the while
-
+		VERBOSE_PROGRESS_STOP();
 		VERBOSE_LOG("End of Iterations." );
 
 
@@ -261,6 +305,8 @@ public:
 };
 
 class UnivariateMixture : public TypedMixture<arma::vec> {};
+class UnivariateIntegerMixture : public TypedMixture<arma::ivec> {};
 class MultivariateMixture : public TypedMixture<arma::mat> {};
+class MultivariateIntegerMixture : public TypedMixture<arma::imat> {};
 
 #endif /* ANTMAN_SRC_MIXTURE_H_ */

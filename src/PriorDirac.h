@@ -1,8 +1,8 @@
 /*
- * PriorDirac.hpp
+ *  AntMAN Package
  *
- *  Created on: Apr 12, 2019
  */
+
 
 #ifndef ANTMAN_SRC_PRIORDIRAC_H_
 #define ANTMAN_SRC_PRIORDIRAC_H_
@@ -10,6 +10,7 @@
 
 #include "math_utils.h"
 #include "Prior.h"
+#include "AntMANLogger.h"
 
 // --------------------------------------------------------------------------------------------------------------------
 
@@ -17,11 +18,11 @@ class dirac_gamma_q_param_t : public q_param_t {
 public:
 	int Mstar;
 	dirac_gamma_q_param_t (int Mstar) :  Mstar (Mstar){}
-#ifdef HAS_RCPP
-	virtual const Rcpp::List get_Rcpp_list () const  {
-		return Rcpp::List::create() ;
-	};
-#endif
+	void get_values(AntMANLogger& logger) const {
+	}
+
+
+
 	void update (const  double U, const  int K, const gamma_h_param_t <dirac_gamma_q_param_t>& h_param) {
 		return;
 	}
@@ -58,12 +59,12 @@ public:
 
 	int init_M_na(const int K) {
 		int M_na = this->q_param.Mstar - K ;
-		VERBOSE_ASSERT(M_na >= 0, "Please provide initial clustering with K <= Mstar");
+		VERBOSE_ASSERT(M_na >= 0, "Please provide initial clustering with K <= Mstar: " << K << " (K) > " << this->q_param.Mstar << " (M*)");
 		return M_na;
 	}
 	int update_M_na(const double U ,  const int K) {
 		int M_na = this->q_param.Mstar - K ;
-		VERBOSE_ASSERT(M_na >= 0, "Internal Error, K > Mstar.");
+		VERBOSE_ASSERT(M_na >= 0, "Internal Error, K > Mstar." << this->q_param.Mstar << K << " (K) > " << this->q_param.Mstar << " (M*)");
 		return M_na;
 
 	}

@@ -1,17 +1,17 @@
 /*
- * MixtureMultivariateBernoulli.hpp
+ *  AntMAN Package
  *
- *  Created on: Mar 8, 2019
  */
+
 
 #ifndef ANTMAN_SRC_MIXTUREMULTIVARIATEBERNOULLI_HPP_
 #define ANTMAN_SRC_MIXTUREMULTIVARIATEBERNOULLI_HPP_
 
-
 #include "math_utils.h"
 #include "Mixture.h"
+#include "AntMANLogger.h"
 
-class MixtureMultivariateBinomial: public MultivariateMixture  {
+class MixtureMultivariateBinomial: public MultivariateIntegerMixture  {
 
 	// Parametric Prior
 	arma::vec      _mb;
@@ -23,18 +23,11 @@ class MixtureMultivariateBinomial: public MultivariateMixture  {
 public :
 	MixtureMultivariateBinomial (const arma::vec  a0, const arma::vec  b0) :  _mb(a0.size(), arma::fill::ones), _a0 (a0), _b0 (b0) {}
 	//Mixture_MultivariateBernoulli (const arma::vec  a0, const arma::vec  b0, const arma::vec  mb) :  _mb(mb), _a0 (a0), _b0 (b0) {}
-#ifdef HAS_RCPP
-	Rcpp::List get_tau () {
-		return Rcpp::List::create(Rcpp::Named("theta") = _theta ) ;
+
+	void get_tau (AntMANLogger& logger) const {
+			logger.addlog("theta", _theta);
 	}
-#else
-	std::string get_tau () {
-		std::string res = "theta=[";
-		for (auto e : _theta) res += e;
-		res += "]";
-		return res;
-	}
-#endif
+
 	virtual void init_tau (const input_t & y, const int M) {
 
 		VERBOSE_DEBUG(" init_tau (const input_t & y, const int M)");
@@ -70,7 +63,7 @@ public :
 
 		arma::vec Log_S_current = arma::log(S_current);
 		cluster_indices_t ci_current(n);
-		arma::vec random_u   = arma::randu(n);
+		arma::vec random_u   = am_randu(n);
 
 		for (int i=0; i < n; i++) {
 
@@ -152,7 +145,7 @@ public :
 				std::vector<int> & which_ind=clusters_indices [ci_star[l]];
 
 				//Prepare the variable that will contain the data in the cluster
-				std::vector <arma::vec>  y_l (nj[l]);
+				std::vector <arma::ivec>  y_l (nj[l]);
 				//Separate the data in each cluster and rename the cluster
 				for(int it=0;it<nj[l];it++){
 					y_l[it]=y.row(which_ind[it]).t();
@@ -175,7 +168,7 @@ public :
 
 
 				//First compute the posterior parameters
-				const arma::vec ysum = y_l.size() ? vectorsum(y_l) : arma::zeros(d);
+				const arma::ivec ysum = y_l.size() ? vectorsum<arma::ivec>(y_l) : arma::zeros<arma::ivec>(d);
 
 				const arma::vec an = a0 + ysum;
 				const arma::vec bn = njvec % mb  - ysum + b0; // remove mb
@@ -207,6 +200,37 @@ public :
 
 
 	 }
+
+	 input_t sample(const arma::vec & W_current,arma::uword  n) {
+
+		 VERBOSE_DEBUG("Run sample");
+
+		 long int selected_M = runif_component(W_current);
+		 input_t res = input_t(1,_theta.n_cols);
+
+
+		 VERBOSE_EXTRA("selected_M = " << selected_M);
+
+
+		 auto theta0  = _theta.row(selected_M); // take row
+		 for (arma::uword idx = 0 ; idx < _theta.n_cols ; idx++) {
+			 auto e = theta0[idx];
+			 VERBOSE_ASSERT((e <= 1) or (e >= 0), "Condition not checked e in (0,1): Invalid Theta");
+
+			 // sample a value between 0 and 1 , if smaller than e
+			 auto sample = am_runif(0,1);
+			 res[idx] = sample >= e ? 0 : 1;
+		 }
+
+
+		 // TODO: output is the result.
+
+		 VERBOSE_DEBUG("Return result");
+		 return res;
+
+
+	 }
+
 };
 
 

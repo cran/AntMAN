@@ -1,8 +1,8 @@
 /*
- * MixtureUnivariatePoisson.hpp
+ *  AntMAN Package
  *
- *  Created on: Mar 8, 2019
  */
+
 
 #ifndef ANTMAN_SRC_MIXTUREUNIVARIATEPOISSON_HPP_
 #define ANTMAN_SRC_MIXTUREUNIVARIATEPOISSON_HPP_
@@ -11,7 +11,7 @@
 #include "math_utils.h"
 #include "Mixture.h"
 
-class MixtureUnivariatePoisson : public UnivariateMixture {
+class MixtureUnivariatePoisson : public UnivariateIntegerMixture {
 
 	// ParametricPrior
 	double _alpha0, _beta0;
@@ -21,18 +21,11 @@ class MixtureUnivariatePoisson : public UnivariateMixture {
 
 public :
 	MixtureUnivariatePoisson (const double alpha0, const double beta0) : _alpha0 (alpha0), _beta0 (beta0) {}
-#ifdef HAS_RCPP
-	Rcpp::List get_tau () {
-		return Rcpp::List::create(Rcpp::Named("theta") = _theta ) ;
+
+	void get_tau (AntMANLogger& logger) const {
+			logger.addlog("theta", _theta);
 	}
-#else
-	std::string get_tau () {
-		std::string res = "theta=[";
-		for (auto e : _theta) res += e;
-		res += "]";
-		return res;
-	}
-#endif
+
 	void init_tau (const input_t & y, const int M) {
 		const double beta0 = _alpha0;
 		const double alpha0 = _beta0;
@@ -148,7 +141,7 @@ public :
 			const std::vector<double>& theta_current = this->_theta;
 			arma::vec Log_S_current = arma::log(S_current);
 			cluster_indices_t ci_current(n);
-			arma::vec random_u   = arma::randu(n);
+			arma::vec random_u   = am_randu(n);
 
 			for (int i=0; i < n; i++) {
 
@@ -178,6 +171,15 @@ public :
 
 			return  ci_current ;
 
+	}
+
+	input_t sample(const arma::vec & W_current, arma::uword n) {
+		input_t result (n);
+		long int selected_M = runif_component(W_current);
+		for (arma::uword i = 0 ; i < n ; i++) {
+			result(i) = am_rpois ( this->_theta[selected_M] );
+		}
+		return result;
 	}
 
 };

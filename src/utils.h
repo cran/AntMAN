@@ -1,7 +1,6 @@
 /*
- * utils.hpp
+ *  AntMAN Package
  *
- *  Created on: Jan 30, 2019
  */
 
 #ifndef ANTMAN_SRC_UTILS_HPP_
@@ -12,8 +11,9 @@
 
 typedef arma::ivec cluster_indices_t;
 
-inline arma::vec vectorsum (std::vector <arma::vec> elems ) {
-	arma::vec out = elems[0];
+template < typename T>
+inline T vectorsum (std::vector <T> elems ) {
+	T out = elems[0];
 	for (unsigned int i = 1 ; i < elems.size() ; i ++) {
 		out += elems[i] ;
 	}
@@ -22,6 +22,7 @@ inline arma::vec vectorsum (std::vector <arma::vec> elems ) {
 
 inline double  update_lsd ( double lsd, double ln_acp, double iter) {
 
+	VERBOSE_DEBUG("lsd = " << lsd << " ln_acp = " << ln_acp << " iter = " << iter);
 
 	// This is a new parameter to adjust lsd (ADAPTIVE METROPOLIS; the user could be allowed to set a different value in (-1,0) different that -0.7; Even if it is dangerous to change it
 	double wg=std::pow(iter,-0.7);
@@ -38,7 +39,7 @@ inline double  update_lsd ( double lsd, double ln_acp, double iter) {
 	scrivi:
 	s2(new) = s2(old) * exp( wg*(alpha - tau) )
 	*/
-	lsd = lsd * std::exp(wg*(std::exp(std::min(0.0,ln_acp))-bartau));
+	lsd = lsd + (wg*(std::exp(std::min(0.0,ln_acp))-bartau));
 
 	if(lsd<std::pow(10,-50)){
 		lsd=std::pow(10,-50);
@@ -47,6 +48,7 @@ inline double  update_lsd ( double lsd, double ln_acp, double iter) {
 		lsd=std::pow(10,50);
 	}
 
+	VERBOSE_DEBUG("lsd = " << lsd);
 
 	return lsd;
 
@@ -56,13 +58,33 @@ inline double  update_lsd ( double lsd, double ln_acp, double iter) {
 /// This is a function to sample one observation from a multivariate
 //  Normal with mean vector mu and varcov Sig
 
-inline arma::vec mvrnormArma(arma::colvec mu, arma::mat Sig) {
+inline arma::vec mvrnormArma(arma::colvec mu, arma::mat SigUnchecked) {  // TODO : What to do in case of error ?
 
-	VERBOSE_ASSERT(Sig.is_sympd(), "mvrnormArma requires Sig to be symmetric. It is not S = " << Sig);
+	arma::mat Sig = SigUnchecked;
 
-	arma::vec Y = arma::randn<arma::vec>(Sig.n_cols);
+	//if (not Sig.is_sympd()) {
+		//VERBOSE_WARNING("mvrnormArma requires Sig to be symmetric. Sig auto-corrected.");
+		//Sig  =  arma::symmatu(Sig);
+	//}
 
-	return mu +  arma::chol(Sig) * Y;
+
+	//VERBOSE_ASSERT(Sig.is_sympd(), "mvrnormArma requires Sig to be symmetric. It is not Sig = " << std::endl << Sig);
+
+
+	arma::vec Y = am_randn(Sig.n_cols);
+	arma::mat cholres = Sig;
+
+	try {
+		cholres =  arma::chol(Sig) ;
+
+	} catch (std::runtime_error& e) {
+		VERBOSE_ERROR("cholesky failed....");
+		cholres = Sig;
+
+	}
+
+
+	return mu +  cholres * Y;
 }
 
 
@@ -84,31 +106,40 @@ inline double dmvnormZero(const arma::mat& x, const arma::vec& mu, const arma::m
 
 }
 
-// Strongly inspired from RcppDist, but assume this does not impose the GPL.
-inline arma::mat riwish(const int df, const arma::mat& iS) {
+inline arma::mat riwish(const int df, const arma::mat& iSUnchecked) {  // TODO : What to do in case of error ?
 
-	arma::mat S = arma::inv(iS);
+	arma::mat iS = iSUnchecked;
 
-	VERBOSE_ASSERT(S.is_sympd(), "riwish requires S to be symmetric. It is not S = " << S << " and iS = " << S);
+		if (not iS.is_sympd()) {
+			VERBOSE_WARNING("riwish requires iS to be symmetric. iS auto-corrected.");
+			iS  =  arma::symmatu(iS);
+		}
 
-	arma::uword m = S.n_cols;
 
-    arma::mat A(m, m, arma::fill::zeros);
+		arma::mat iwishrndres = iS;
+			try {
+				// commented because the inverse returns warnings 
+				//iwishrndres =  arma::iwishrnd(iS, df) ;
 
-    for (arma::uword i = 1; i < m; ++i ) {
-    	//A.col(i) = Rcpp::as<arma::vec>(Rcpp::rnorm(i)); // Need to test that
-    	for (arma::uword j = 0; j < i; ++j ) {
-    		A(i, j) =  am_rnorm(0.0, 1.0);
-    	}
-    }
-    for (arma::uword i = 0; i < m; ++i ) {
-    	A(i, i) = sqrt(am_rchisq(df - i));
-    }
-    arma::mat B = A.t() * arma::chol(S);
+				//debugging the chol warning
+				arma::mat iS_inv = iS.i();
+				if (not iS_inv.is_symmetric()){
+					iS_inv = arma::symmatu(iS_inv);
+				}
+				iwishrndres = arma::symmatu(arma::wishrnd(iS_inv, df).i());
+				if (not iwishrndres.is_symmetric()){
+					iwishrndres = arma::symmatu(iwishrndres);
+				}
 
-    return  arma::inv(B.t() * B);
+
+			} catch (std::runtime_error& e) {
+				VERBOSE_ERROR("cholesky failed....");
+				iwishrndres = iS;
+
+			}
+
+	return iwishrndres;
 }
-
 
 
 

@@ -1,14 +1,12 @@
 /*
- * MixtureUnivariateNormal.hpp
+ *  AntMAN Package
  *
- *  Created on: Mar 8, 2019
  */
+
 
 #ifndef ANTMAN_SRC_MIXTUREUNIVARIATENORMAL_HPP_
 #define ANTMAN_SRC_MIXTUREUNIVARIATENORMAL_HPP_
 
-#include <omp.h>
-// [[Rcpp::plugins(openmp)]]]
 
 #include "math_utils.h"
 #include "Mixture.h"
@@ -24,22 +22,12 @@ class MixtureUnivariateNormal: public UnivariateMixture  {
 
 public :
 	MixtureUnivariateNormal (const double m0, const double k0, const double nu0, const double sig02) : _m0 (m0), _k0 (k0), _nu0 (nu0), _sig02  (sig02){}
-#ifdef HAS_RCPP
-	Rcpp::List get_tau () {
-		return Rcpp::List::create(Rcpp::Named("mu") =  _mu_current, Rcpp::Named("sig2") =  _sig2_current  ) ;
+
+	void get_tau (AntMANLogger& logger) const {
+		logger.addlog("mu", _mu_current);
+		logger.addlog("sig2", _sig2_current);
 	}
-#else
-	std::string get_tau () {
-		std::string res = "mu=";
-		res += "mu=[";
-		for (auto e : _mu_current) {res+= std::to_string(e) + ",";}
-		res += "] ";
-		res += "sig2=[";
-		for (auto e : _sig2_current) {res+= std::to_string(e) + ",";}
-		res += "] ";
-		return res;
-	}
-#endif
+
 	virtual void init_tau (const input_t & y, const int M) {
 		 _mu_current.resize(M);
 		 _sig2_current.resize(M);
@@ -71,7 +59,7 @@ public :
 		std::vector<double> pow_sig2_current (M);
 		std::vector<double> log_pow_sig2_current (M);
 
-		arma::vec random_u   = arma::randu(n);
+		arma::vec random_u   = am_randu(n);
 
 
 		for(int l=0;l<M;l++){
@@ -80,8 +68,7 @@ public :
 		}
 
 
-		omp_set_dynamic(0);
-	    #pragma omp parallel for num_threads(4)
+#pragma omp parallel for if (this->get_parallel())  num_threads(4) schedule(static, 8)
 		for (int i=0; i < n; i++) {
 
 			arma::vec pesi(M);
@@ -230,6 +217,16 @@ public :
 
 	 }
 
+
+	 input_t sample(const arma::vec & W_current, arma::uword  n) {
+
+		 long int selected_M = runif_component(W_current);
+		 double mu = _mu_current[selected_M];
+		 double powsig2 = pow(_sig2_current[selected_M],0.5) ;
+		 double value = am_rnorm (mu,powsig2);
+		 return input_t ({value});
+
+	 }
 };
 
 
